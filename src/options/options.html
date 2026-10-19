@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LC Sync settings</title>
+<style>
+  body { font: 14px system-ui, sans-serif; max-width: 480px; margin: 32px auto; padding: 0 16px; }
+  label { display: block; margin-top: 14px; font-weight: 600; }
+  input { width: 100%; padding: 8px; box-sizing: border-box; margin-top: 4px; }
+  button { margin-top: 18px; margin-right: 8px; padding: 8px 14px; }
+  #status { margin-top: 14px; white-space: pre-wrap; }
+  small { color: #666; font-weight: 400; }
+</style>
+<h2>LC Sync</h2>
+<label>GitHub token <small>(fine-grained, Contents: read/write on one repo)</small>
+  <input id="token" type="password" placeholder="github_pat_..." autocomplete="off"></label>
+<label>Repository <small>(owner/name, must already have at least one commit)</small>
+  <input id="repo" placeholder="youruser/leetcode"></label>
+<label>Branch
+  <input id="branch" placeholder="main"></label>
+<label>Folder prefix <small>(optional)</small>
+  <input id="folder" placeholder="solutions"></label>
+<button id="save">Save</button><button id="test">Test connection</button>
+<div id="status"></div>
+<script src="options.js"></script>
