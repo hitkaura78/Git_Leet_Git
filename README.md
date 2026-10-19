@@ -1,4 +1,4 @@
-# LC Sync
+Git_Leet_Git
 
 Chrome extension that pushes every Accepted LeetCode submission to a GitHub repo:
 - Commit 1: the solution file
