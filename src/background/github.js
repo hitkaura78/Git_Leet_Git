@@ -14,7 +14,7 @@ function b64(str) {
 }
 
 function call(cfg, path, { method = "GET", body, accept = "application/vnd.github+json" } = {}) {
-  const token = cfg.token.replace(/^bearer\s+/i, "").replace(/^token\s+/i, "").trim();
+  const token = (cfg.token || "").replace(/^bearer\s+/i, "").replace(/^token\s+/i, "").trim();
   return fetch(API + path, {
     method,
     headers: {
@@ -30,17 +30,89 @@ function call(cfg, path, { method = "GET", body, accept = "application/vnd.githu
 async function ok(res, what) {
   if (!res.ok) {
     const text = await res.text();
-    const err = new Error(`${what} failed (${res.status}): ${text}`);
+    let msg = text;
+    try {
+      const j = JSON.parse(text);
+      if (j.message) msg = j.message;
+    } catch (_) {}
+
+    if (res.status === 401) {
+      throw new Error(`GitHub token invalid or expired (401: ${msg}). Check token in LC Sync settings.`);
+    }
+    if (res.status === 403) {
+      throw new Error(`GitHub write permission denied (403: ${msg}). Token needs 'Contents: Read and write' permissions.`);
+    }
+    if (res.status === 404) {
+      throw new Error(`GitHub resource not found (404: ${msg}). Verify repository owner/name.`);
+    }
+
+    const err = new Error(`${what} failed (${res.status}): ${msg}`);
     err.status = res.status;
     throw err;
   }
   return res.json();
 }
 
+// Ensures the branch exists and returns { branch, parentSha }.
+// If the repository is empty (0 commits), automatically initializes it with README.md.
+// If the default branch is different (e.g. master vs main), auto-detects it.
+async function ensureBranch(cfg) {
+  const repo = `/repos/${cfg.repo}`;
+  let branch = seg(cfg.branch || "main");
+
+  const res = await call(cfg, `${repo}/git/ref/heads/${branch}`);
+  if (res.ok) {
+    const data = await res.json();
+    return { branch, parentSha: data.object.sha };
+  }
+
+  if (res.status === 404) {
+    // Check repository metadata
+    const repoRes = await call(cfg, repo);
+    if (!repoRes.ok) {
+      await ok(repoRes, `Repository "${cfg.repo}"`);
+    }
+    const repoInfo = await repoRes.json();
+
+    // 1. Check if default_branch is different (e.g. master vs main)
+    if (repoInfo.default_branch && repoInfo.default_branch !== branch) {
+      const altBranch = seg(repoInfo.default_branch);
+      const altRes = await call(cfg, `${repo}/git/ref/heads/${altBranch}`);
+      if (altRes.ok) {
+        const altData = await altRes.json();
+        return { branch: altBranch, parentSha: altData.object.sha };
+      }
+    }
+
+    // 2. Repository might be completely empty (0 commits). Initialize with README.md!
+    console.log(`[LC Sync] Repository "${cfg.repo}" is empty. Initializing with README.md on branch "${branch}"...`);
+    const initRes = await call(cfg, `${repo}/contents/README.md`, {
+      method: "PUT",
+      body: {
+        message: "Initial commit by LC Sync",
+        content: b64("# LeetCode Solutions\n\nAutomated sync by [LC Sync](https://github.com).\n"),
+        branch: branch
+      }
+    });
+
+    if (initRes.ok) {
+      const initData = await initRes.json();
+      const parentSha = (initData.commit && initData.commit.sha) || initData.content?.sha;
+      console.log(`[LC Sync] Repository initialized. Root commit: ${parentSha}`);
+      return { branch, parentSha };
+    }
+
+    await ok(initRes, `Initialize empty repository "${cfg.repo}"`);
+  }
+
+  await ok(res, `Get branch "${cfg.branch}"`);
+}
+
 // Raw text of a file on the branch, or null if it does not exist.
 export async function readFile(cfg, path) {
   const cleanPath = seg(path);
-  const res = await call(cfg, `/repos/${cfg.repo}/contents/${cleanPath}?ref=${encodeURIComponent(cfg.branch)}`, {
+  const branch = seg(cfg.branch || "main");
+  const res = await call(cfg, `/repos/${cfg.repo}/contents/${cleanPath}?ref=${encodeURIComponent(branch)}`, {
     accept: "application/vnd.github.raw+json"
   });
   if (res.status === 404) return null;
@@ -48,15 +120,13 @@ export async function readFile(cfg, path) {
   return res.text();
 }
 
-// Create ONE commit on cfg.branch containing `files` ([{path, content}]).
+// Create ONE commit containing `files` ([{path, content}]) on cfg.branch.
 export async function commit(cfg, files, message) {
   const repo = `/repos/${cfg.repo}`;
-  const branch = seg(cfg.branch);
 
   for (let attempt = 1; ; attempt++) {
     try {
-      const ref = await ok(await call(cfg, `${repo}/git/ref/heads/${branch}`), `Get branch "${cfg.branch}"`);
-      const parentSha = ref.object.sha;
+      const { branch, parentSha } = await ensureBranch(cfg);
       const parent = await ok(await call(cfg, `${repo}/git/commits/${parentSha}`), "Get parent commit");
 
       const tree = [];
@@ -80,7 +150,8 @@ export async function commit(cfg, files, message) {
       });
       if (upd.ok) return created.sha;
 
-      const e = new Error(`Update branch "${cfg.branch}" failed (${upd.status}): ${await upd.text()}`);
+      const updErr = await upd.text();
+      const e = new Error(`Update branch "${branch}" failed (${upd.status}): ${updErr}`);
       e.status = upd.status;
       throw e;
     } catch (e) {

@@ -29,6 +29,7 @@ export function messages(id, d) {
   const runtime = d.runtimeDisplay || "N/A";
   const memory = d.memoryDisplay || "N/A";
   return {
+    combined: `feat: solve ${label} [${lang}] - ${runtime}, ${memory} (#${id})`,
     solution: `feat: accepted ${label} [${lang}] (#${id})`,
     stats: `docs: stats for ${label} - ${runtime}, ${memory} (#${id})`
   };

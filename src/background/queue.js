@@ -1,7 +1,5 @@
-// Durable job queue. Each accepted submission is a job with two stages:
-//   stage 0 -> commit 1 (solution)  -> stage 1 -> commit 2 (stats) -> done
-// Progress is saved after every commit, so a failure between the two
-// commits never duplicates commit 1 on retry.
+// Durable job queue. Each accepted submission is a job:
+// Commits both solution and stats atomically in ONE single commit on GitHub.
 import { getConfig } from "./config.js";
 import { commit, readFile } from "./github.js";
 import { paths, messages, statsFile } from "./render.js";
@@ -30,25 +28,19 @@ async function run() {
   while (queue.length) {
     const job = queue[0];
     try {
-      console.log(`[LC Sync] Processing job #${job.id} (stage ${job.stage || 0})...`);
+      console.log(`[LC Sync] Processing job #${job.id}...`);
       const cfg = await getConfig();
       const p = paths(cfg, job.details);
       const msg = messages(job.id, job.details);
 
-      if (job.stage < 1) {
-        console.log(`[LC Sync] Pushing solution commit for #${job.id}: ${p.solution}...`);
-        await commit(cfg, [{ path: p.solution, content: job.details.code }], msg.solution);
-        job.stage = 1;
-        await chrome.storage.local.set({ queue });
-        console.log(`[LC Sync] Solution commit created.`);
-      }
-      if (job.stage < 2) {
-        console.log(`[LC Sync] Pushing stats commit for #${job.id}: ${p.stats}...`);
-        const existing = await readFile(cfg, p.stats);
-        await commit(cfg, [{ path: p.stats, content: statsFile(existing, job.id, job.details) }], msg.stats);
-        job.stage = 2;
-        console.log(`[LC Sync] Stats commit created.`);
-      }
+      console.log(`[LC Sync] Fetching existing stats for ${p.stats}...`);
+      const existing = await readFile(cfg, p.stats);
+
+      console.log(`[LC Sync] Committing solution and stats for #${job.id}...`);
+      await commit(cfg, [
+        { path: p.solution, content: job.details.code },
+        { path: p.stats, content: statsFile(existing, job.id, job.details) }
+      ], msg.combined || msg.solution);
 
       queue.shift();
       done.push(job.id);

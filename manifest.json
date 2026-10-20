@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "LC Sync",
   "version": "2.0.0",
-  "description": "On every Accepted LeetCode submission: 1 commit for the code, 1 commit for the stats.",
+  "description": "On every Accepted LeetCode submission: pushes code and performance stats to GitHub.",
   "permissions": [
     "storage",
     "alarms"
