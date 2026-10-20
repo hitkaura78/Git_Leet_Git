@@ -3,21 +3,43 @@
   "name": "LC Sync",
   "version": "2.0.0",
   "description": "On every Accepted LeetCode submission: 1 commit for the code, 1 commit for the stats.",
-  "permissions": ["storage", "alarms"],
-  "host_permissions": ["https://leetcode.com/*", "https://api.github.com/*"],
-  "background": { "service_worker": "src/background/index.js", "type": "module" },
-  "action": { "default_title": "LC Sync settings" },
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://leetcode.com/*",
+    "https://leetcode.cn/*",
+    "https://api.github.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background/index.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "LC Sync settings"
+  },
   "options_page": "src/options/options.html",
   "content_scripts": [
     {
-      "matches": ["https://leetcode.com/problems/*"],
-      "js": ["src/content/page-hook.js"],
+      "matches": [
+        "https://leetcode.com/*",
+        "https://leetcode.cn/*"
+      ],
+      "js": [
+        "src/content/page-hook.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://leetcode.com/problems/*"],
-      "js": ["src/content/bridge.js"],
+      "matches": [
+        "https://leetcode.com/*",
+        "https://leetcode.cn/*"
+      ],
+      "js": [
+        "src/content/bridge.js"
+      ],
       "run_at": "document_start"
     }
   ]

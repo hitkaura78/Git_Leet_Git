@@ -1,9 +1,21 @@
 import { enqueue, drain } from "./queue.js";
 
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg && msg.type === "ACCEPTED") enqueue({ id: msg.id, details: msg.details });
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === "ACCEPTED") {
+    enqueue({ id: msg.id, details: msg.details });
+    if (sendResponse) sendResponse({ ok: true });
+  } else if (msg && msg.type === "RETRY_QUEUE") {
+    drain();
+    if (sendResponse) sendResponse({ ok: true });
+  }
+  return true;
 });
 
-chrome.alarms.onAlarm.addListener((a) => { if (a.name === "lc-retry") drain(); });
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === "lc-retry") drain();
+});
+
 chrome.runtime.onStartup.addListener(drain);
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
+
+console.log("[LC Sync] Background service worker initialized.");

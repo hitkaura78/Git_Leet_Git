@@ -1,23 +1,109 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>LC Sync settings</title>
-<style>
-  body { font: 14px system-ui, sans-serif; max-width: 480px; margin: 32px auto; padding: 0 16px; }
-  label { display: block; margin-top: 14px; font-weight: 600; }
-  input { width: 100%; padding: 8px; box-sizing: border-box; margin-top: 4px; }
-  button { margin-top: 18px; margin-right: 8px; padding: 8px 14px; }
-  #status { margin-top: 14px; white-space: pre-wrap; }
-  small { color: #666; font-weight: 400; }
-</style>
-<h2>LC Sync</h2>
-<label>GitHub token <small>(fine-grained, Contents: read/write on one repo)</small>
-  <input id="token" type="password" placeholder="github_pat_..." autocomplete="off"></label>
-<label>Repository <small>(owner/name, must already have at least one commit)</small>
-  <input id="repo" placeholder="youruser/leetcode"></label>
-<label>Branch
-  <input id="branch" placeholder="main"></label>
-<label>Folder prefix <small>(optional)</small>
-  <input id="folder" placeholder="solutions"></label>
-<button id="save">Save</button><button id="test">Test connection</button>
-<div id="status"></div>
-<script src="options.js"></script>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LC Sync settings</title>
+  <style>
+    body {
+      font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 500px;
+      margin: 32px auto;
+      padding: 0 16px;
+      color: #24292f;
+    }
+    h2 { margin-bottom: 4px; }
+    p.subtitle { color: #57606a; margin-top: 0; margin-bottom: 20px; font-size: 13px; }
+    label { display: block; margin-top: 14px; font-weight: 600; font-size: 13px; }
+    input {
+      width: 100%;
+      padding: 8px 10px;
+      box-sizing: border-box;
+      margin-top: 4px;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    input:focus {
+      outline: none;
+      border-color: #0969da;
+      box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.2);
+    }
+    .btn-group { margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap; }
+    button {
+      padding: 8px 16px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      border: 1px solid rgba(27, 31, 36, 0.15);
+    }
+    #save { background: #1f883d; color: #fff; }
+    #save:hover { background: #1a7f37; }
+    #test { background: #f6f8fa; color: #24292f; }
+    #test:hover { background: #f3f4f6; }
+    #retry { background: #f6f8fa; color: #cf222e; display: none; }
+    #retry:hover { background: #ffebe9; }
+    #status {
+      margin-top: 16px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      font-size: 13px;
+      display: none;
+    }
+    #status.success { display: block; background: #dafbe1; color: #1a7f37; border: 1px solid #aceebb; }
+    #status.error { display: block; background: #ffebe9; color: #cf222e; border: 1px solid #ff8182; }
+    #status.info { display: block; background: #ddf4ff; color: #0969da; border: 1px solid #80ccff; }
+    .card {
+      margin-top: 24px;
+      padding: 12px 14px;
+      background: #f6f8fa;
+      border-radius: 6px;
+      border: 1px solid #d0d7de;
+      font-size: 12px;
+    }
+    .card h4 { margin: 0 0 6px 0; font-size: 13px; }
+    small { color: #57606a; font-weight: 400; }
+  </style>
+</head>
+<body>
+  <h2>LC Sync</h2>
+  <p class="subtitle">Sync every Accepted LeetCode submission directly to GitHub.</p>
+
+  <label>GitHub Personal Access Token <small>(fine-grained PAT with Contents: read/write)</small>
+    <input id="token" type="password" placeholder="github_pat_..." autocomplete="off">
+  </label>
+
+  <label>GitHub Repository <small>(owner/name, e.g. youruser/leetcode)</small>
+    <input id="repo" placeholder="youruser/leetcode" autocomplete="off">
+  </label>
+
+  <label>Branch
+    <input id="branch" placeholder="main" autocomplete="off">
+  </label>
+
+  <label>Folder prefix <small>(optional, e.g. solutions)</small>
+    <input id="folder" placeholder="solutions" autocomplete="off">
+  </label>
+
+  <div class="btn-group">
+    <button id="save">Save Settings</button>
+    <button id="test">Test Connection</button>
+    <button id="retry">Retry Failed Syncs</button>
+  </div>
+
+  <div id="status"></div>
+
+  <div class="card">
+    <h4>Setup Checklist</h4>
+    <ol style="margin: 0; padding-left: 18px; line-height: 1.6;">
+      <li>Create a repository on GitHub (make sure to initialize it with a README.md or at least 1 commit).</li>
+      <li>Generate a GitHub token at <b>github.com &gt; Settings &gt; Developer Settings &gt; Personal access tokens</b>.</li>
+      <li>Grant permissions: <b>Repository permissions &gt; Contents: Read and write</b> on your solutions repo.</li>
+      <li>Click <b>Test Connection</b> above to verify.</li>
+    </ol>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
