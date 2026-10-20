@@ -1,4 +1,4 @@
-# LC Sync
+Git_Leet_Git
 
 Chrome extension that automatically pushes every **Accepted** LeetCode submission to a GitHub repository:
 - **Commit 1:** The accepted solution code (e.g. `0001-two-sum/solution.py`)
