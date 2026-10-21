@@ -4,11 +4,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "ACCEPTED") {
     enqueue({ id: msg.id, details: msg.details });
     if (sendResponse) sendResponse({ ok: true });
-  } else if (msg && msg.type === "RETRY_QUEUE") {
+    return false;
+  }
+  if (msg && msg.type === "RETRY_QUEUE") {
     drain();
     if (sendResponse) sendResponse({ ok: true });
+    return false;
   }
-  return true;
 });
 
 chrome.alarms.onAlarm.addListener((a) => {

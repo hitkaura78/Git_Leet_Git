@@ -4,155 +4,164 @@
 
 (function () {
   const seenSubmissions = new Set();
-  let trackedSubmissionId = null;
-
-  function trackSubmissionId(id) {
-    if (!id) return;
-    const str = String(id).trim();
-    if (str && !seenSubmissions.has(str)) {
-      trackedSubmissionId = str;
-      console.log(`[LC Sync] 🎯 Tracked submission ID: #${str}`);
-    }
-  }
+  let activeSubmissionId = null;
+  let lastSubmitTime = 0;
 
   function notifyAccepted(submissionId) {
-    const id = String(submissionId || trackedSubmissionId || "").trim();
+    const id = String(submissionId || "").trim();
     if (!id || seenSubmissions.has(id)) return;
     seenSubmissions.add(id);
 
     console.log(`[LC Sync] 🎉 Accepted submission confirmed: #${id}`);
     window.postMessage({ source: "lc-sync", submissionId: id }, "*");
+    try {
+      document.dispatchEvent(new CustomEvent("lc-sync-accepted", { detail: { submissionId: id } }));
+    } catch (_) {}
   }
 
-  // Intercept URL for submission ID
-  function checkUrlForSubmissionId() {
-    const match = window.location.pathname.match(/\/submissions\/(?:detail\/)?(\d+)/i);
-    if (match) {
-      trackSubmissionId(match[1]);
-    }
+  // Safely extract JSON from XMLHttpRequest without triggering InvalidStateError
+  function getXhrResponse(xhr) {
+    try {
+      if (xhr.responseType === "json" && xhr.response) {
+        return xhr.response;
+      }
+      if (!xhr.responseType || xhr.responseType === "text") {
+        if (typeof xhr.responseText === "string" && xhr.responseText.trim()) {
+          return JSON.parse(xhr.responseText);
+        }
+      }
+      if (xhr.response) {
+        if (typeof xhr.response === "object") return xhr.response;
+        if (typeof xhr.response === "string" && xhr.response.trim()) {
+          return JSON.parse(xhr.response);
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
-  // Intercept request payloads to find submissionId before response arrives
+  // Inspect request body to find submissionId before response arrives
   function inspectRequestBody(body) {
     if (!body) return;
     try {
       const parsed = typeof body === "string" ? JSON.parse(body) : body;
       if (parsed && parsed.variables) {
         const v = parsed.variables;
-        if (v.submissionId) trackSubmissionId(v.submissionId);
-        if (v.id) trackSubmissionId(v.id);
+        if (v.submissionId) {
+          activeSubmissionId = String(v.submissionId);
+        }
       }
     } catch (_) {}
   }
 
-  // Inspect responses from GraphQL or REST
-  function inspectResponseData(url, data) {
+  // Handle submit response: capture the new submission ID
+  function handlePossibleSubmit(url, data) {
     if (!data || typeof data !== "object") return;
 
-    // 1. REST check endpoint: /submissions/detail/<id>/check/
+    // REST: /problems/<slug>/submit/
+    if (url.includes("/submit/")) {
+      const subId = data.submission_id || data.id;
+      if (subId) {
+        activeSubmissionId = String(subId);
+        lastSubmitTime = Date.now();
+        console.log(`[LC Sync] 📋 New submission queued: #${activeSubmissionId}`);
+      }
+    }
+
+    // GraphQL: submitCode mutation
+    if (data.data && data.data.submitCode) {
+      const subId = data.data.submitCode.submission_id || data.data.submitCode.id;
+      if (subId) {
+        activeSubmissionId = String(subId);
+        lastSubmitTime = Date.now();
+        console.log(`[LC Sync] 📋 New GraphQL submission queued: #${activeSubmissionId}`);
+      }
+    }
+  }
+
+  // Handle check/polling response: verify if the submission is Accepted
+  function handlePossibleCheck(url, data) {
+    if (!data || typeof data !== "object") return;
+
+    // 1. REST polling: /submissions/detail/<id>/check/
     const restMatch = String(url).match(/\/submissions\/detail\/(\d+)\/check\/?/i);
     if (restMatch) {
-      const subId = restMatch[1] || data.submission_id || data.id;
-      trackSubmissionId(subId);
-
+      const subId = restMatch[1] || data.submission_id || activeSubmissionId;
       const state = String(data.state || "").toUpperCase();
       const statusMsg = String(data.status_msg || data.status_display || "").toLowerCase();
-      const isAccepted = statusMsg === "accepted" || data.status_code === 10 || data.run_success === true;
-      if (state === "SUCCESS" && isAccepted) {
-        notifyAccepted(subId);
-      }
-      return;
-    }
+      const statusCode = Number(data.status_code);
 
-    // 2. REST submit endpoint: /problems/<slug>/submit/
-    if (url.includes("/submit/")) {
-      if (data.submission_id || data.id) {
-        trackSubmissionId(data.submission_id || data.id);
-      }
-    }
+      console.log(`[LC Sync] Check polling #${subId}: state=${state}, status=${statusMsg || statusCode}`);
 
-    // 3. GraphQL responses
-    if (data.data) {
-      const d = data.data;
-
-      // 3a. submitCode mutation response
-      if (d.submitCode) {
-        const subId = d.submitCode.submission_id || d.submitCode.id;
-        if (subId) trackSubmissionId(subId);
-      }
-
-      // 3b. checkSubmissionStatus query response
-      const checkNode = d.checkSubmissionStatus || d.submissionStatus || d.checkSubmission;
-      if (checkNode) {
-        const state = String(checkNode.state || "").toUpperCase();
-        const statusMsg = String(checkNode.status_msg || checkNode.statusDisplay || "").toLowerCase();
-        const statusCode = Number(checkNode.status_code || checkNode.statusCode);
+      if (state === "SUCCESS") {
         const isAccepted =
           statusMsg === "accepted" ||
           statusCode === 10 ||
-          (checkNode.run_success === true && checkNode.total_correct && checkNode.total_correct === checkNode.total_testcases);
+          (data.run_success === true && data.total_correct && data.total_correct === data.total_testcases);
 
-        if (state === "SUCCESS" && isAccepted) {
-          const subId = checkNode.submission_id || checkNode.id || trackedSubmissionId;
-          if (subId) notifyAccepted(subId);
-        }
-      }
-
-      // 3c. submissionDetails query response
-      if (d.submissionDetails) {
-        const sd = d.submissionDetails;
-        const status = String(sd.statusDisplay || sd.statusMsg || "").toLowerCase();
-        const isAccepted = status === "accepted" || Number(sd.statusCode) === 10;
-        const subId = sd.id || sd.submissionId || trackedSubmissionId;
         if (isAccepted && subId) {
           notifyAccepted(subId);
         }
       }
+      return;
+    }
 
-      // 3d. Recent submissions list
-      const list =
-        (d.submissionList && d.submissionList.submissions) ||
-        (d.questionSubmissions && d.questionSubmissions.submissions) ||
-        d.recentSubmissions;
-      if (Array.isArray(list) && list.length > 0) {
-        const latest = list[0];
-        if (latest) {
-          const status = String(latest.statusDisplay || latest.status || "").toLowerCase();
-          if (status === "accepted" && latest.id) {
-            trackSubmissionId(latest.id);
-            const now = Date.now() / 1000;
-            const ts = Number(latest.timestamp || now);
-            if (Math.abs(now - ts) < 180) {
-              notifyAccepted(latest.id);
-            }
+    // 2. GraphQL polling: checkSubmissionStatus
+    if (data.data) {
+      const cs = data.data.checkSubmissionStatus || data.data.submissionStatus || data.data.checkSubmission;
+      if (cs) {
+        const state = String(cs.state || "").toUpperCase();
+        const statusMsg = String(cs.status_msg || cs.statusDisplay || "").toLowerCase();
+        const statusCode = Number(cs.status_code || cs.statusCode);
+        const subId = cs.submission_id || cs.id || activeSubmissionId;
+
+        console.log(`[LC Sync] GraphQL check #${subId}: state=${state}, status=${statusMsg || statusCode}`);
+
+        if (state === "SUCCESS") {
+          const isAccepted =
+            statusMsg === "accepted" ||
+            statusCode === 10 ||
+            (cs.run_success === true && cs.total_correct && cs.total_correct === cs.total_testcases);
+
+          if (isAccepted && subId) {
+            notifyAccepted(subId);
           }
         }
       }
     }
   }
 
-  // Hook window.fetch
+  function processResponse(url, data) {
+    if (!data) return;
+    handlePossibleSubmit(url, data);
+    handlePossibleCheck(url, data);
+  }
+
+  // 1. Hook window.fetch
   const originalFetch = window.fetch;
   window.fetch = async function (...args) {
-    const rawUrl = typeof args[0] === "string" ? args[0] : (args[0] && args[0].url) ? args[0].url : "";
-    const url = String(rawUrl);
+    let url = "";
+    try {
+      if (typeof args[0] === "string") url = args[0];
+      else if (args[0] && args[0].url) url = args[0].url;
+    } catch (_) {}
 
-    // Inspect request body
-    if (args[1] && args[1].body) {
-      inspectRequestBody(args[1].body);
-    } else if (args[0] && typeof args[0] === "object" && typeof args[0].clone === "function") {
-      try {
+    try {
+      if (args[1] && args[1].body) {
+        inspectRequestBody(args[1].body);
+      } else if (args[0] && typeof args[0] === "object" && typeof args[0].clone === "function") {
         args[0].clone().text().then(inspectRequestBody).catch(() => {});
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
 
     const response = await originalFetch.apply(this, args);
 
     try {
-      if (url.includes("/submissions/") || url.includes("/graphql") || url.includes("/submit/")) {
+      const u = String(url || "");
+      if (u.includes("/submit/") || u.includes("/submissions/") || u.includes("/graphql")) {
         const clone = response.clone();
         clone.json().then((data) => {
-          inspectResponseData(url, data);
+          processResponse(u, data);
         }).catch(() => {});
       }
     } catch (_) {}
@@ -160,7 +169,7 @@
     return response;
   };
 
-  // Hook XMLHttpRequest
+  // 2. Hook XMLHttpRequest
   const origOpen = XMLHttpRequest.prototype.open;
   const origSend = XMLHttpRequest.prototype.send;
 
@@ -180,10 +189,10 @@
     this.addEventListener("load", function () {
       try {
         const url = this._lc_url;
-        if (url && (url.includes("/submissions/") || url.includes("/graphql") || url.includes("/submit/"))) {
-          if (this.responseText) {
-            const data = JSON.parse(this.responseText);
-            inspectResponseData(url, data);
+        if (url && (url.includes("/submit/") || url.includes("/submissions/") || url.includes("/graphql"))) {
+          const data = getXhrResponse(this);
+          if (data) {
+            processResponse(url, data);
           }
         }
       } catch (_) {}
@@ -192,33 +201,70 @@
     return origSend.call(this, body);
   };
 
-  // Hook history pushState and replaceState to detect submission URL changes
+  // 3. User Submit Click Listener
+  function onUserSubmit() {
+    lastSubmitTime = Date.now();
+    activeSubmissionId = null;
+    console.log("[LC Sync] 🚀 User clicked Submit! Monitoring execution...");
+  }
+
+  document.addEventListener("click", function (e) {
+    const btn = e.target && e.target.closest('button, [role="button"]');
+    if (btn) {
+      const isSubmitBtn =
+        btn.getAttribute("data-e2e-locator") === "console-submit-button" ||
+        /^Submit$/i.test((btn.textContent || "").trim());
+      if (isSubmitBtn) {
+        onUserSubmit();
+      }
+    }
+  }, true);
+
+  // Keyboard shortcut Ctrl+Enter / Cmd+Enter on LeetCode editor submits
+  document.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      onUserSubmit();
+    }
+  }, true);
+
+  // 4. URL change listener for dynamic layout submissions
+  function checkUrlForSubmission() {
+    const match = window.location.pathname.match(/\/submissions\/(?:detail\/)?(\d+)/i);
+    if (match) {
+      activeSubmissionId = match[1];
+    }
+  }
+
   const origPush = history.pushState;
   history.pushState = function (...args) {
     const res = origPush.apply(this, args);
-    checkUrlForSubmissionId();
+    checkUrlForSubmission();
     return res;
   };
 
   const origReplace = history.replaceState;
   history.replaceState = function (...args) {
     const res = origReplace.apply(this, args);
-    checkUrlForSubmissionId();
+    checkUrlForSubmission();
     return res;
   };
 
-  window.addEventListener("popstate", checkUrlForSubmissionId);
-  checkUrlForSubmissionId();
+  window.addEventListener("popstate", checkUrlForSubmission);
 
-  // Fallback: Check DOM for "Accepted" banner
-  function scanDom() {
+  // 5. DOM Observer fallback when user just submitted
+  function scanDomForAccepted() {
+    // Only check if user submitted within the last 90 seconds
+    if (Date.now() - lastSubmitTime > 90000) return;
+
     try {
-      checkUrlForSubmissionId();
-      const allSpans = document.querySelectorAll("span, div, h4, p");
-      for (const el of allSpans) {
+      checkUrlForSubmission();
+      const spans = document.querySelectorAll("span, div, h4, p");
+      for (const el of spans) {
         if (el.children.length === 0 && /^Accepted$/i.test((el.textContent || "").trim())) {
-          if (trackedSubmissionId) {
-            notifyAccepted(trackedSubmissionId);
+          if (activeSubmissionId) {
+            console.log(`[LC Sync] 🎯 DOM confirmed Accepted for active submission #${activeSubmissionId}`);
+            notifyAccepted(activeSubmissionId);
+            activeSubmissionId = null;
             return;
           }
         }
@@ -226,7 +272,7 @@
     } catch (_) {}
   }
 
-  const observer = new MutationObserver(() => scanDom());
+  const observer = new MutationObserver(() => scanDomForAccepted());
   if (document.body) {
     observer.observe(document.body, { childList: true, subtree: true });
   } else {
@@ -235,5 +281,5 @@
     });
   }
 
-  console.log("[LC Sync] Page hook active and monitoring submissions.");
+  console.log("[LC Sync] Page hook active: monitoring active submissions.");
 })();

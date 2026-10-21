@@ -17,22 +17,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchDetails(id) {
   // Give LeetCode's backend a moment to finish recording stats
-  await sleep(400);
+  await sleep(500);
 
   for (let i = 0; i < 5; i++) {
     try {
       const endpoint = `${window.location.origin}/graphql/`;
+      const headers = { "Content-Type": "application/json" };
+      const token = csrf();
+      if (token) headers["x-csrftoken"] = token;
+
       const r = await fetch(endpoint, {
         method: "POST",
         credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "x-csrftoken": csrf()
-        },
+        headers,
         body: JSON.stringify({
           operationName: "submissionDetails",
           query: QUERY,
-          variables: { submissionId: Number(id) }
+          variables: { submissionId: parseInt(id, 10) }
         })
       });
 
@@ -42,41 +43,62 @@ async function fetchDetails(id) {
         if (d && d.code) return d;
       }
     } catch (err) {
-      console.warn("[LC Sync] Attempt " + (i + 1) + " fetching details failed:", err);
+      console.log(`[LC Sync] Fetch details attempt ${i + 1} pending...`);
     }
     await sleep(800 * (i + 1));
   }
   return null;
 }
 
-window.addEventListener("message", async (e) => {
-  if (!e.data || e.data.source !== "lc-sync") return;
-  const id = String(e.data.submissionId);
+async function handleSubmission(submissionId) {
+  const id = String(submissionId || "").trim();
   if (!id || seen.has(id)) return;
   seen.add(id);
 
   console.log(`[LC Sync] Bridge handling submission #${id}...`);
   const details = await fetchDetails(id);
   if (!details) {
-    console.warn(`[LC Sync] Could not fetch details for submission #${id}; resetting so it can retry.`);
+    console.log(`[LC Sync] Could not fetch details for submission #${id} yet; resetting tracker.`);
     seen.delete(id);
     return;
   }
 
   const title = details.question?.title || "Problem";
   const lang = details.lang?.name || "Code";
-  console.log(`[LC Sync] Fetched details for #${id}: ${title} [${lang}]. Notifying background worker...`);
+  console.log(`[LC Sync] Fetched details for #${id}: ${title} [${lang}]. Forwarding to background worker...`);
+
+  // Verify extension runtime connection
+  if (typeof chrome === "undefined" || !chrome.runtime || typeof chrome.runtime.sendMessage !== "function" || !chrome.runtime.id) {
+    console.error("[LC Sync] Extension is disconnected. Please refresh this LeetCode tab (Ctrl+R / F5) to reconnect.");
+    seen.delete(id);
+    return;
+  }
 
   try {
     chrome.runtime.sendMessage({ type: "ACCEPTED", id, details }, (res) => {
-      if (chrome.runtime.lastError) {
-        console.warn("[LC Sync] Warning from background worker:", chrome.runtime.lastError.message);
+      const err = chrome.runtime.lastError;
+      if (err) {
+        console.warn("[LC Sync] Background message status:", err.message);
       } else {
-        console.log(`[LC Sync] Background worker received #${id}.`);
+        console.log(`[LC Sync] Background worker queued #${id}.`);
       }
     });
   } catch (err) {
     console.error("[LC Sync] Failed to message background worker:", err);
+    seen.delete(id);
+  }
+}
+
+// Listen for messages from page-hook.js via window.postMessage
+window.addEventListener("message", (e) => {
+  if (!e.data || e.data.source !== "lc-sync") return;
+  handleSubmission(e.data.submissionId);
+});
+
+// Also listen for custom DOM event as an alternative bridge channel
+document.addEventListener("lc-sync-accepted", (e) => {
+  if (e.detail && e.detail.submissionId) {
+    handleSubmission(e.detail.submissionId);
   }
 });
 
